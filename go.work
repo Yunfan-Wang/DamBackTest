@@ -1,0 +1,10 @@
+go 1.25.6
+
+use (
+	./remote
+	./raft
+	./dambt
+	./cmd/coordinator
+	./cmd/datanode
+	./cmd/worker
+)

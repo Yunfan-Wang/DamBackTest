@@ -1,0 +1,8 @@
+{
+  "chunk_id": "chunk1",
+  "events": [
+    {"timestamp": 1, "instrument": "AAPL", "price": 100, "volume": 10},
+    {"timestamp": 2, "instrument": "AAPL", "price": 101, "volume": 15},
+    {"timestamp": 3, "instrument": "AAPL", "price": 103, "volume": 20}
+  ]
+}

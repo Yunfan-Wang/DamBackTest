@@ -1,0 +1,12 @@
+{
+  "chunk": {
+    "chunk_id": "chunk1",
+    "instrument": "AAPL",
+    "start_ts": 1,
+    "end_ts": 2,
+    "replicas": ["127.0.0.1:9101"],
+    "version": 1,
+    "sealed": true
+  }
+
+}
