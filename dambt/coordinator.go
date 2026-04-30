@@ -34,23 +34,42 @@ type Coordinator struct {
 
 }
 
-func NewCoordinator(addr string, workers []string,  id int) *Coordinator {
-	
-	peerInfo := []raft.RaftSetupInfo{
-		{
-			Id:   0,
-			Addr: "127.0.0.1:8001",   // Raft RPC address
-			Caddr:"127.0.0.1:8101",   // Control RPC (can be dummy)
-		},
-		{Id: 1, Addr: "127.0.0.1:8002", Caddr: "127.0.0.1:8102"},
-		{Id: 2, Addr: "127.0.0.1:8003", Caddr: "127.0.0.1:8103"},
+func NewCoordinator(addr string, workers []string, id int, raftPeers []string, ctrlPeers []string) *Coordinator {
+	if len(raftPeers) == 0 {
+		raftPeers = []string{
+			"127.0.0.1:8001",
+			"127.0.0.1:8002",
+			"127.0.0.1:8003",
+		}
 	}
+
+	if len(ctrlPeers) == 0 {
+		ctrlPeers = []string{
+			"127.0.0.1:8101",
+			"127.0.0.1:8102",
+			"127.0.0.1:8103",
+		}
+	}
+
+	if len(raftPeers) != len(ctrlPeers) {
+		panic("raftPeers and ctrlPeers must have same length")
+	}
+
+	peerInfo := make([]raft.RaftSetupInfo, 0, len(raftPeers))
+	for i := range raftPeers {
+		peerInfo = append(peerInfo, raft.RaftSetupInfo{
+			Id:    i,
+			Addr:  raftPeers[i],
+			Caddr: ctrlPeers[i],
+		})
+	}
+
 	rf := raft.NewRaftPeer(peerInfo, id)
 	_ = rf.Activate()
-	
+
 	applyCh := rf.ApplyChan()
 
-	c := &Coordinator{
+	return &Coordinator{
 		Addr:     addr,
 		chunks:   make(map[ChunkID]ChunkMeta),
 		jobs:     make(map[JobID]JobSpec),
@@ -58,19 +77,13 @@ func NewCoordinator(addr string, workers []string,  id int) *Coordinator {
 		results:  make(map[JobID]JobResult),
 		workers:  workers,
 		jobQueue: make(chan JobSpec, 1024),
-		// wal:            NewWAL("./dambt.wal"),
-		// checkpointPath: "./dambt.checkpoint.json",
-		// raft
+
 		applyCh: applyCh,
 		rf:      rf,
 
 		pending: make(map[int]chan struct{}),
-		// register pending after submit, also track a-applied indexes
 		applied: make(map[int]bool),
 	}
-	// _ = c.recoverState()
-	return c
-
 }
 
 func (c *Coordinator) Start() error {
@@ -251,6 +264,13 @@ func (c *Coordinator) schedulerLoop() {
 		// 	JobID:  job.JobID,
 		// 	Status: &running,
 		// })
+		c.mu.Lock()
+		st := c.status[job.JobID]
+		c.mu.Unlock()
+		if st == JobRunning || st == JobDone || st == JobFailed {
+			log.Printf("[coordinator] skip duplicate job=%s status=%s", job.JobID, st)
+			continue
+		}
 		log.Printf("[coordinator] picked job=%s", job.JobID)
 		// obsolete scheduler status updates
 		// c.mu.Lock()
@@ -579,7 +599,7 @@ func runJobOnWorkerRPC(workerAddr string, job JobSpec, chunks []ChunkMeta) (JobR
 	})
 
 	if rerr.Err != "" {
-		return JobResult{}, fmt.Errorf(rerr.Err)
+		return JobResult{}, fmt.Errorf("%s", rerr.Err)
 	}
 
 	return resp.Result, nil
@@ -601,6 +621,10 @@ func (c *Coordinator) applyDAMBTCommand(cmd DAMBTCommand) {
 
 	case CmdSubmitJob:
 		if cmd.Job != nil {
+			if _, exists := c.jobs[cmd.Job.JobID]; exists {
+				return
+			}
+
 			c.jobs[cmd.Job.JobID] = *cmd.Job
 			c.status[cmd.Job.JobID] = JobQueued
 

@@ -5,3 +5,5 @@ return MergeResults(job, parts)
 but for now:
 parallel execution uses chunk-local computation,
 and global consistency requires boundary-aware merge (future work)
+
+3. (not implemented) true scaling, where parallel coordinator features are used

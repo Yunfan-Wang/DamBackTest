@@ -137,7 +137,7 @@ func fetchChunkFromReplicas(c ChunkMeta) ([]MarketEvent, error) {
 
 		out, rerr := client.GetChunk(c.ChunkID)
 		if rerr.Err != "" {
-			lastErr = fmt.Errorf(rerr.Err)
+			lastErr = fmt.Errorf("%s", rerr.Err)
 			log.Printf("[worker] rpc get failed chunk=%s replica=%s err=%v", c.ChunkID, replica, lastErr)
 			continue
 		}
