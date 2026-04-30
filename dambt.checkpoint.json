@@ -6,7 +6,7 @@
       "start_ts": 1,
       "end_ts": 2,
       "replicas": [
-        "127.0.0.1:9101"
+        "127.0.0.1:9401"
       ],
       "version": 1,
       "sealed": true
@@ -17,7 +17,7 @@
       "start_ts": 3,
       "end_ts": 4,
       "replicas": [
-        "127.0.0.1:9101"
+        "127.0.0.1:9401"
       ],
       "version": 1,
       "sealed": true
@@ -121,6 +121,62 @@
       "start_ts": 1,
       "end_ts": 4,
       "strategy": "momentum"
+    },
+    "job-1777540355520807200": {
+      "job_id": "job-1777540355520807200",
+      "instrument": "AAPL",
+      "start_ts": 1,
+      "end_ts": 4,
+      "strategy": "momentum"
+    },
+    "job-1777540429488237300": {
+      "job_id": "job-1777540429488237300",
+      "instrument": "AAPL",
+      "start_ts": 1,
+      "end_ts": 4,
+      "strategy": "momentum"
+    },
+    "job-1777540544653477100": {
+      "job_id": "job-1777540544653477100",
+      "instrument": "AAPL",
+      "start_ts": 1,
+      "end_ts": 4,
+      "strategy": "momentum"
+    },
+    "job-1777540570796003000": {
+      "job_id": "job-1777540570796003000",
+      "instrument": "AAPL",
+      "start_ts": 1,
+      "end_ts": 4,
+      "strategy": "momentum"
+    },
+    "job-1777542007597638500": {
+      "job_id": "job-1777542007597638500",
+      "instrument": "AAPL",
+      "start_ts": 1,
+      "end_ts": 4,
+      "strategy": "momentum"
+    },
+    "job-1777545444706272600": {
+      "job_id": "job-1777545444706272600",
+      "instrument": "AAPL",
+      "start_ts": 1,
+      "end_ts": 4,
+      "strategy": "momentum"
+    },
+    "job-1777545569596648300": {
+      "job_id": "job-1777545569596648300",
+      "instrument": "AAPL",
+      "start_ts": 1,
+      "end_ts": 4,
+      "strategy": "momentum"
+    },
+    "job-1777545959261745800": {
+      "job_id": "job-1777545959261745800",
+      "instrument": "AAPL",
+      "start_ts": 1,
+      "end_ts": 4,
+      "strategy": "momentum"
     }
   },
   "status": {
@@ -137,7 +193,15 @@
     "job-1777538708974471200": "done",
     "job-1777538734586292200": "done",
     "job-1777538836269593400": "done",
-    "job-1777538853596923600": "done"
+    "job-1777538853596923600": "done",
+    "job-1777540355520807200": "failed",
+    "job-1777540429488237300": "failed",
+    "job-1777540544653477100": "done",
+    "job-1777540570796003000": "done",
+    "job-1777542007597638500": "done",
+    "job-1777545444706272600": "done",
+    "job-1777545569596648300": "done",
+    "job-1777545959261745800": "done"
   },
   "results": {
     "job-1777534211834054400": {
@@ -223,6 +287,42 @@
       "events_read": 4,
       "pnl": 4,
       "logs": []
+    },
+    "job-1777540544653477100": {
+      "job_id": "job-1777540544653477100",
+      "events_read": 4,
+      "pnl": 4,
+      "logs": []
+    },
+    "job-1777540570796003000": {
+      "job_id": "job-1777540570796003000",
+      "events_read": 4,
+      "pnl": 4,
+      "logs": []
+    },
+    "job-1777542007597638500": {
+      "job_id": "job-1777542007597638500",
+      "events_read": 4,
+      "pnl": 4,
+      "logs": []
+    },
+    "job-1777545444706272600": {
+      "job_id": "job-1777545444706272600",
+      "events_read": 4,
+      "pnl": 4,
+      "logs": []
+    },
+    "job-1777545569596648300": {
+      "job_id": "job-1777545569596648300",
+      "events_read": 4,
+      "pnl": 4,
+      "logs": []
+    },
+    "job-1777545959261745800": {
+      "job_id": "job-1777545959261745800",
+      "events_read": 4,
+      "pnl": 4,
+      "logs": null
     }
   }
 }

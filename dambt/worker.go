@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"log"
+	"remote"
 )
 
 type Worker struct {
@@ -84,38 +85,72 @@ func fetchAllChunks(chunks []ChunkMeta) ([]MarketEvent, error) {
 
 	return all, nil
 }
+// legacy naiive fetch
+// func fetchChunkFromReplicas(c ChunkMeta) ([]MarketEvent, error) {
+// 	var lastErr error
 
+// 	for _, replica := range c.Replicas {
+// 		url := fmt.Sprintf("http://%s/get_chunk?id=%s", replica, c.ChunkID)
+// 		log.Printf("[worker] fetching chunk=%s from %s", c.ChunkID, replica)
+		
+// 		resp, err := http.Get(url)
+// 		if err != nil {
+// 			lastErr = err
+// 			continue
+// 		}
+
+// 		var out GetChunkResponse
+// 		err = json.NewDecoder(resp.Body).Decode(&out)
+// 		resp.Body.Close()
+
+// 		if err != nil || resp.StatusCode != http.StatusOK {
+// 			log.Printf("[worker %s] failed replica=%s chunk=%s err=%v",	c.ChunkID, replica, c.ChunkID, err)
+
+// 			lastErr = fmt.Errorf("bad response from replica %s", replica)
+// 			continue
+// 		}
+// 		log.Printf("[worker %s] success replica=%s chunk=%s events=%d", c.ChunkID, replica, c.ChunkID, len(out.Events))
+// 		return out.Events, nil
+// 	}
+
+// 	if lastErr == nil {
+// 		lastErr = fmt.Errorf("no replicas available for chunk %s", c.ChunkID)
+// 	}
+	
+	
+// 	return nil, lastErr
+// }
+
+// remote upgrade
 func fetchChunkFromReplicas(c ChunkMeta) ([]MarketEvent, error) {
 	var lastErr error
 
 	for _, replica := range c.Replicas {
-		url := fmt.Sprintf("http://%s/get_chunk?id=%s", replica, c.ChunkID)
-		log.Printf("[worker] fetching chunk=%s from %s", c.ChunkID, replica)
-		
-		resp, err := http.Get(url)
-		if err != nil {
+		log.Printf("[worker] rpc fetching chunk=%s from replica=%s", c.ChunkID, replica)
+
+		client := &DataNodeRPCInterface{}
+		if err := remote.CallerStubCreator(client, replica, false, false); err != nil {
 			lastErr = err
+			log.Printf("[worker] rpc stub failed chunk=%s replica=%s err=%v", c.ChunkID, replica, err)
 			continue
 		}
 
-		var out GetChunkResponse
-		err = json.NewDecoder(resp.Body).Decode(&out)
-		resp.Body.Close()
-
-		if err != nil || resp.StatusCode != http.StatusOK {
-			log.Printf("[worker %s] failed replica=%s chunk=%s err=%v",	c.ChunkID, replica, c.ChunkID, err)
-
-			lastErr = fmt.Errorf("bad response from replica %s", replica)
+		out, rerr := client.GetChunk(c.ChunkID)
+		if rerr.Err != "" {
+			lastErr = fmt.Errorf(rerr.Err)
+			log.Printf("[worker] rpc get failed chunk=%s replica=%s err=%v", c.ChunkID, replica, lastErr)
 			continue
 		}
-		log.Printf("[worker %s] success replica=%s chunk=%s events=%d", c.ChunkID, replica, c.ChunkID, len(out.Events))
+
+		log.Printf("[worker] rpc success chunk=%s replica=%s events=%d",
+			c.ChunkID, replica, len(out.Events))
+
 		return out.Events, nil
 	}
 
 	if lastErr == nil {
 		lastErr = fmt.Errorf("no replicas available for chunk %s", c.ChunkID)
 	}
-	
-	
+
 	return nil, lastErr
 }

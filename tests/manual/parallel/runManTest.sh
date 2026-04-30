@@ -2,18 +2,14 @@
 set -euo pipefail
 
 COORD="http://127.0.0.1:9000"
-DATANODE="http://127.0.0.1:9101"
+DATANODE="http://127.0.0.1:9401"
 
 echo "1. Send chunk1"
-curl -s -X POST "$DATANODE/put_chunk" \
-  -H "Content-Type: application/json" \
-  -d @chunk1.json
+go run ../../../cmd/put_chunk_rpc --addr 127.0.0.1:9401 --file chunk1.json
 echo
 
 echo "2. Send chunk2"
-curl -s -X POST "$DATANODE/put_chunk" \
-  -H "Content-Type: application/json" \
-  -d @chunk2.json
+go run ../../../cmd/put_chunk_rpc --addr 127.0.0.1:9401 --file chunk2.json
 echo
 
 echo "3. Register chunk1"

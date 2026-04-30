@@ -1,7 +1,6 @@
 SendChunk
-curl -X POST http://127.0.0.1:9101/put_chunk   -H "Content-Type: application/json"   -d @chunk1.json
-
-curl -X POST http://127.0.0.1:9101/put_chunk   -H "Content-Type: application/json"   -d @chunk2.json
+go run ../../cmd/put_chunk_rpc --addr 127.0.0.1:9401 --file chunk1.json
+go run ../../cmd/put_chunk_rpc --addr 127.0.0.1:9401 --file chunk2.json
 
 Register
 curl -X POST http://127.0.0.1:9000/register_chunk \

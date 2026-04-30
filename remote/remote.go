@@ -306,7 +306,7 @@ func (c *CalleeStub) GetCallCount() int {
 
 func init() {
     gob.Register(RemoteError{})
-	gob.Register(StockOrder{})
+	// gob.Register(StockOrder{})
 }
 
 func convert(val reflect.Value, targetType reflect.Type) reflect.Value {

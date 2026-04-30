@@ -850,3 +850,26 @@ func (p *RaftPeer) LeaderIndex() int {
 	}
 	return p.leaderHint
 }
+
+// DAMBT Specialization
+func (p *RaftPeer) ForceLeaderForSingleNode() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.active = true
+	p.role = 2
+	p.leaderHint = p.me
+
+	if len(p.log) == 1 {
+		p.log = append(p.log, LogEntry{
+			Command: nil,
+			Term:    p.currentTerm,
+		})
+	}
+
+	for i := range p.nextIndex {
+		p.nextIndex[i] = len(p.log)
+		p.matchIndex[i] = 0
+	}
+	p.matchIndex[p.me] = len(p.log) - 1
+}

@@ -7,4 +7,7 @@ use (
 	./cmd/coordinator
 	./cmd/datanode
 	./cmd/worker
+	./cmd/worker_rpc
+	./cmd/datanode_rpc
+	./cmd/put_chunk_rpc
 )

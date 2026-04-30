@@ -7,6 +7,9 @@ import (
 	"net/http"
 	"sync"
 	"log"
+	"remote"
+	"raft"
+	"time"
 )
 
 type Coordinator struct {
@@ -21,11 +24,32 @@ type Coordinator struct {
 	workers []string
 	jobQueue chan JobSpec
 	// failure recovery module
-	wal            *WAL
-	checkpointPath string
+	// wal            *WAL
+	// checkpointPath string
+	// raft
+	rf      *raft.RaftPeer
+	applyCh <-chan raft.ApplyMsg
+	pending map[int]chan struct{}
+	applied map[int]bool
+
 }
 
-func NewCoordinator(addr string, workers []string) *Coordinator {
+func NewCoordinator(addr string, workers []string,  id int) *Coordinator {
+	
+	peerInfo := []raft.RaftSetupInfo{
+		{
+			Id:   0,
+			Addr: "127.0.0.1:8001",   // Raft RPC address
+			Caddr:"127.0.0.1:8101",   // Control RPC (can be dummy)
+		},
+		{Id: 1, Addr: "127.0.0.1:8002", Caddr: "127.0.0.1:8102"},
+		{Id: 2, Addr: "127.0.0.1:8003", Caddr: "127.0.0.1:8103"},
+	}
+	rf := raft.NewRaftPeer(peerInfo, id)
+	_ = rf.Activate()
+	
+	applyCh := rf.ApplyChan()
+
 	c := &Coordinator{
 		Addr:     addr,
 		chunks:   make(map[ChunkID]ChunkMeta),
@@ -34,17 +58,24 @@ func NewCoordinator(addr string, workers []string) *Coordinator {
 		results:  make(map[JobID]JobResult),
 		workers:  workers,
 		jobQueue: make(chan JobSpec, 1024),
-		wal:            NewWAL("./dambt.wal"),
-		checkpointPath: "./dambt.checkpoint.json",
+		// wal:            NewWAL("./dambt.wal"),
+		// checkpointPath: "./dambt.checkpoint.json",
+		// raft
+		applyCh: applyCh,
+		rf:      rf,
+
+		pending: make(map[int]chan struct{}),
+		// register pending after submit, also track a-applied indexes
+		applied: make(map[int]bool),
 	}
-	_ = c.recoverState()
+	// _ = c.recoverState()
 	return c
 
 }
 
 func (c *Coordinator) Start() error {
+	go c.raftApplyLoop()
 	go c.schedulerLoop()
-
 	mux := http.NewServeMux()
 	mux.HandleFunc("/register_chunk", c.handleRegisterChunk)
 	mux.HandleFunc("/submit_job", c.handleSubmitJob)
@@ -76,18 +107,26 @@ func (c *Coordinator) handleRegisterChunk(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := c.wal.Append(WALEntry{
-		Type:  "REGISTER_CHUNK",
+	// if err := c.wal.Append(WALEntry{
+	// 	Type:  "REGISTER_CHUNK",
+	// 	Chunk: &chunk,
+	// }); err != nil {
+	// 	WriteError(w, http.StatusInternalServerError, err.Error())
+	// 	return
+	// }
+	//obsolete direct mutation
+	// c.mu.Lock()
+	// c.chunks[chunk.ChunkID] = chunk
+	// _ = c.checkpointLocked()
+	// c.mu.Unlock()
+
+	if err := c.submitMetadataCommand(DAMBTCommand{
+		Op:    CmdRegisterChunk,
 		Chunk: &chunk,
 	}); err != nil {
 		WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	c.mu.Lock()
-	c.chunks[chunk.ChunkID] = chunk
-	_ = c.checkpointLocked()
-	c.mu.Unlock()
 	
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"success":  true,
@@ -124,21 +163,28 @@ func (c *Coordinator) handleSubmitJob(w http.ResponseWriter, r *http.Request) {
 		Strategy:   req.Strategy,
 	}
 
-	if err := c.wal.Append(WALEntry{
-		Type: "SUBMIT_JOB",
-		Job:  &job,
+	// if err := c.wal.Append(WALEntry{
+	// 	Type: "SUBMIT_JOB",
+	// 	Job:  &job,
+	// }); err != nil {
+	// 	WriteError(w, http.StatusInternalServerError, err.Error())
+	// 	return
+	// }
+	if err := c.submitMetadataCommand(DAMBTCommand{
+		Op:  CmdSubmitJob,
+		Job: &job,
 	}); err != nil {
 		WriteError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	// obsolete direct mutation + queue
+	// c.mu.Lock()
+	// c.jobs[job.JobID] = job
+	// c.status[job.JobID] = JobQueued
+	// _ = c.checkpointLocked()
+	// c.mu.Unlock()
 
-	c.mu.Lock()
-	c.jobs[job.JobID] = job
-	c.status[job.JobID] = JobQueued
-	_ = c.checkpointLocked()
-	c.mu.Unlock()
-
-	c.jobQueue <- job
+	// c.jobQueue <- job
 
 	WriteJSON(w, http.StatusOK, SubmitJobResponse{
 		JobID: job.JobID,
@@ -195,17 +241,32 @@ func (c *Coordinator) schedulerLoop() {
 	// workerIndex := 0
 
 	for job := range c.jobQueue {
-		running := JobRunning
-		_ = c.wal.Append(WALEntry{
-			Type:   "JOB_STATUS",
-			JobID:  job.JobID,
-			Status: &running,
-		})
+		if !c.rf.IsLeader() {
+			log.Printf("[coordinator] skip job=%s because not leader", job.JobID)
+			continue
+		}
+		// running := JobRunning
+		// _ = c.wal.Append(WALEntry{
+		// 	Type:   "JOB_STATUS",
+		// 	JobID:  job.JobID,
+		// 	Status: &running,
+		// })
 		log.Printf("[coordinator] picked job=%s", job.JobID)
+		// obsolete scheduler status updates
+		// c.mu.Lock()
+		// c.status[job.JobID] = JobRunning
+		// chunks := c.findChunksLocked(job)
+		// c.mu.Unlock()
+		_ = c.submitMetadataCommand(DAMBTCommand{
+			Op:     CmdJobStatus,
+			JobID:  job.JobID,
+			Status: JobRunning,
+		})
+
 		c.mu.Lock()
-		c.status[job.JobID] = JobRunning
 		chunks := c.findChunksLocked(job)
 		c.mu.Unlock()
+
 		log.Printf("[coordinator] job=%s matched chunks=%d", job.JobID, len(chunks))
 		if len(chunks) == 0 {
 			c.markJobFailed(job.JobID)
@@ -241,15 +302,22 @@ func (c *Coordinator) schedulerLoop() {
 			continue
 		}
 		
-		_ = c.wal.Append(WALEntry{
-			Type:   "JOB_DONE",
+		// _ = c.wal.Append(WALEntry{
+		// 	Type:   "JOB_DONE",
+		// 	Result: &result,
+		// })
+		// Obsolete
+		// c.mu.Lock()
+		// c.results[job.JobID] = result
+		// c.status[job.JobID] = JobDone
+		// _ = c.checkpointLocked()
+		// c.mu.Unlock()
+
+		_ = c.submitMetadataCommand(DAMBTCommand{
+			Op:     CmdJobDone,
 			Result: &result,
 		})
-		c.mu.Lock()
-		c.results[job.JobID] = result
-		c.status[job.JobID] = JobDone
-		_ = c.checkpointLocked()
-		c.mu.Unlock()
+
 		log.Printf("[coordinator] job=%s done events=%d pnl=%.4f", job.JobID, result.EventsRead, result.PnL)
 	}
 }
@@ -266,18 +334,28 @@ func (c *Coordinator) findChunksLocked(job JobSpec) []ChunkMeta {
 	return out
 }
 
-func (c *Coordinator) markJobFailed(jobID JobID) {
-	failed := JobFailed
-	_ = c.wal.Append(WALEntry{
-		Type:   "JOB_STATUS",
-		JobID:  jobID,
-		Status: &failed,
-	})
+// func (c *Coordinator) markJobFailed(jobID JobID) {
+// 	failed := JobFailed
+// 	_ = c.wal.Append(WALEntry{
+// 		Type:   "JOB_STATUS",
+// 		JobID:  jobID,
+// 		Status: &failed,
+// 	})
 
-	c.mu.Lock()
-	c.status[jobID] = JobFailed
-	_ = c.checkpointLocked()
-	c.mu.Unlock()
+// 	c.mu.Lock()
+// 	c.status[jobID] = JobFailed
+// 	_ = c.checkpointLocked()
+// 	c.mu.Unlock()
+// 	log.Printf("[coordinator] job=%s FAILED", jobID)
+// }
+
+// Raft specialized 
+func (c *Coordinator) markJobFailed(jobID JobID) {
+	_ = c.submitMetadataCommand(DAMBTCommand{
+		Op:     CmdJobStatus,
+		JobID:  jobID,
+		Status: JobFailed,
+	})
 	log.Printf("[coordinator] job=%s FAILED", jobID)
 }
 
@@ -313,77 +391,77 @@ func runJobOnWorker(workerAddr string, job JobSpec, chunks []ChunkMeta) (JobResu
 
 
 // failure recovery functions
-func (c *Coordinator) recoverState() error {
-	cp, err := LoadCheckpoint(c.checkpointPath)
-	if err != nil {
-		return err
-	}
+// func (c *Coordinator) recoverState() error {
+// 	cp, err := LoadCheckpoint(c.checkpointPath)
+// 	if err != nil {
+// 		return err
+// 	}
 
-	if cp.Chunks != nil {
-		c.chunks = cp.Chunks
-	}
-	if cp.Jobs != nil {
-		c.jobs = cp.Jobs
-	}
-	if cp.Status != nil {
-		c.status = cp.Status
-	}
-	if cp.Results != nil {
-		c.results = cp.Results
-	}
+// 	if cp.Chunks != nil {
+// 		c.chunks = cp.Chunks
+// 	}
+// 	if cp.Jobs != nil {
+// 		c.jobs = cp.Jobs
+// 	}
+// 	if cp.Status != nil {
+// 		c.status = cp.Status
+// 	}
+// 	if cp.Results != nil {
+// 		c.results = cp.Results
+// 	}
 
-	entries, err := c.wal.Load()
-	if err != nil {
-		return err
-	}
+// 	entries, err := c.wal.Load()
+// 	if err != nil {
+// 		return err
+// 	}
 
-	for _, e := range entries {
-		c.applyWALEntry(e)
-	}
+// 	for _, e := range entries {
+// 		c.applyWALEntry(e)
+// 	}
 
-	for jobID, st := range c.status {
-		if st == JobRunning || st == JobQueued {
-			job := c.jobs[jobID]
-			c.status[jobID] = JobQueued
-			c.jobQueue <- job
-		}
-	}
+// 	for jobID, st := range c.status {
+// 		if st == JobRunning || st == JobQueued {
+// 			job := c.jobs[jobID]
+// 			c.status[jobID] = JobQueued
+// 			c.jobQueue <- job
+// 		}
+// 	}
 
-	return nil
-}
+// 	return nil
+// }
 
-func (c *Coordinator) applyWALEntry(e WALEntry) {
-	switch e.Type {
-	case "REGISTER_CHUNK":
-		if e.Chunk != nil {
-			c.chunks[e.Chunk.ChunkID] = *e.Chunk
-		}
-	case "SUBMIT_JOB":
-		if e.Job != nil {
-			c.jobs[e.Job.JobID] = *e.Job
-			c.status[e.Job.JobID] = JobQueued
-		}
-	case "JOB_STATUS":
-		if e.Status != nil {
-			c.status[e.JobID] = *e.Status
-		}
-	case "JOB_DONE":
-		if e.Result != nil {
-			c.results[e.Result.JobID] = *e.Result
-			c.status[e.Result.JobID] = JobDone
-		}
-	}
-}
+// func (c *Coordinator) applyWALEntry(e WALEntry) {
+// 	switch e.Type {
+// 	case "REGISTER_CHUNK":
+// 		if e.Chunk != nil {
+// 			c.chunks[e.Chunk.ChunkID] = *e.Chunk
+// 		}
+// 	case "SUBMIT_JOB":
+// 		if e.Job != nil {
+// 			c.jobs[e.Job.JobID] = *e.Job
+// 			c.status[e.Job.JobID] = JobQueued
+// 		}
+// 	case "JOB_STATUS":
+// 		if e.Status != nil {
+// 			c.status[e.JobID] = *e.Status
+// 		}
+// 	case "JOB_DONE":
+// 		if e.Result != nil {
+// 			c.results[e.Result.JobID] = *e.Result
+// 			c.status[e.Result.JobID] = JobDone
+// 		}
+// 	}
+// }
 
-func (c *Coordinator) checkpointLocked() error {
-	cp := CoordinatorCheckpoint{
-		Chunks:  c.chunks,
-		Jobs:    c.jobs,
-		Status:  c.status,
-		Results: c.results,
-	}
-	return SaveCheckpoint(c.checkpointPath, cp)
-}
+// func (c *Coordinator) checkpointLocked() error {
+// 	cp := CoordinatorCheckpoint{
+// 		Chunks:  c.chunks,
+// 		Jobs:    c.jobs,
+// 		Status:  c.status,
+// 		Results: c.results,
+// 	}
+// 	return SaveCheckpoint(c.checkpointPath, cp)
+// }
 
 
 // func (w *WAL) Reset() error {
@@ -398,8 +476,10 @@ func (c *Coordinator) runJobWithRetry(startIndex int, job JobSpec, chunks []Chun
 	for attempt := 0; attempt < len(c.workers); attempt++ {
 		idx := (startIndex + attempt) % len(c.workers)
 		worker := c.workers[idx]
+		// use rpc instead
+		// result, err := runJobOnWorker(worker, job, chunks)
+		result, err := runJobOnWorkerRPC(worker, job, chunks)
 
-		result, err := runJobOnWorker(worker, job, chunks)
 		if err == nil {
 			return result, idx + 1, nil
 		}
@@ -482,4 +562,116 @@ func (c *Coordinator) runJobParallel(job JobSpec, chunks []ChunkMeta) (JobResult
 	}
 
 	return MergeResults(job, parts), nil
+}
+
+// RPC upgrade
+
+func runJobOnWorkerRPC(workerAddr string, job JobSpec, chunks []ChunkMeta) (JobResult, error) {
+	client := &WorkerRPCInterface{}
+
+	if err := remote.CallerStubCreator(client, workerAddr, false, false); err != nil {
+		return JobResult{}, err
+	}
+
+	resp, rerr := client.RunBacktest(RunJobRequest{
+		Job:    job,
+		Chunks: chunks,
+	})
+
+	if rerr.Err != "" {
+		return JobResult{}, fmt.Errorf(rerr.Err)
+	}
+
+	return resp.Result, nil
+}
+
+// raft coordinator
+//This mirrors HKVC pattern: external request becomes a command, 
+// Raft commits it, then applyCommand mutates local service state. 
+// HKVC already used that model with submitAndWait and consumeApplies. refer to my lab3 HKVC implementation
+func (c *Coordinator) applyDAMBTCommand(cmd DAMBTCommand) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	switch cmd.Op {
+	case CmdRegisterChunk:
+		if cmd.Chunk != nil {
+			c.chunks[cmd.Chunk.ChunkID] = *cmd.Chunk
+		}
+
+	case CmdSubmitJob:
+		if cmd.Job != nil {
+			c.jobs[cmd.Job.JobID] = *cmd.Job
+			c.status[cmd.Job.JobID] = JobQueued
+
+			if c.rf.IsLeader() {
+				c.jobQueue <- *cmd.Job
+			}
+		}
+	case CmdJobStatus:
+		c.status[cmd.JobID] = cmd.Status
+
+	case CmdJobDone:
+		if cmd.Result != nil {
+			c.results[cmd.Result.JobID] = *cmd.Result
+			c.status[cmd.Result.JobID] = JobDone
+		}
+	}
+
+	// _ = c.checkpointLocked()
+}
+
+
+func (c *Coordinator) submitMetadataCommand(cmd DAMBTCommand) error {
+	data := EncodeCommand(cmd)
+
+	sub := c.rf.Submit(data)
+	if !sub.IsLeader {
+		return fmt.Errorf("not leader")
+	}
+
+	log.Printf("[raft] submit index=%d term=%d op=%s", sub.Index, sub.Term, cmd.Op)
+	ch := make(chan struct{}, 1)
+
+	c.mu.Lock()
+	if c.applied[sub.Index] {
+		c.mu.Unlock()
+		return nil
+	}
+	c.pending[sub.Index] = ch
+	c.mu.Unlock()
+
+	select {
+	case <-ch:
+		return nil
+	case <-time.After(2 * time.Second):
+		c.mu.Lock()
+		delete(c.pending, sub.Index)
+		c.mu.Unlock()
+		return fmt.Errorf("raft commit timeout index=%d op=%s", sub.Index, cmd.Op)
+	}
+}
+
+func (c *Coordinator) raftApplyLoop() {
+	for msg := range c.applyCh {
+		if len(msg.Command) == 0 {
+			continue
+		}
+
+		cmd, err := DecodeCommand(msg.Command)
+		if err != nil {
+			log.Printf("[raft] decode error: %v", err)
+			continue
+		}
+
+		c.applyDAMBTCommand(cmd)
+
+		c.mu.Lock()
+		c.applied[msg.Index] = true
+		if ch, ok := c.pending[msg.Index]; ok {
+			ch <- struct{}{}
+			delete(c.pending, msg.Index)
+		}
+		c.mu.Unlock()
+	}
 }

@@ -4,7 +4,7 @@
     "instrument": "AAPL",
     "start_ts": 3,
     "end_ts": 4,
-    "replicas": ["127.0.0.1:9101"],
+    "replicas": ["127.0.0.1:9401"],
     "version": 1,
     "sealed": true
   }
