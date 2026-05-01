@@ -28,6 +28,17 @@ func NewWorkerRPCServer(addr string) *WorkerRPCServer {
 	return &WorkerRPCServer{Addr: addr}
 }
 
+// * RunBacktest - executes a backtesting request on the worker.
+//
+// Behaviors:
+// Fetches all required chunks, filters events by instrument and time range,
+// runs the configured strategy, and returns the computed job result.
+//
+// Limitations / potential failure scenarios:
+// 1. Fails if any required chunk cannot be fetched.
+// 2. Loads all events into memory before filtering.
+// 3. Performs no caching, prefetching, or partial retry inside the worker.
+// 4. No advanced features like charting and validating.
 func (w *WorkerRPCServer) RunBacktest(req RunJobRequest) (RunJobResponse, remote.RemoteError) {
 	events, err := fetchAllChunks(req.Chunks)
 	if err != nil {

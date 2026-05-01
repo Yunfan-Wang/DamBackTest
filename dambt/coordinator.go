@@ -34,6 +34,21 @@ type Coordinator struct {
 
 }
 
+// * NewCoordinator -- initializes a Coordinator instance with Raft-backed metadata replication.
+//
+// This sets up:
+//   in memory metadata state (chunks, jobs, status, results)
+//   Raft peer for replicated state machine
+//   Then apply channel for committed log entries and do
+//   
+// Behavior:
+//   If raftPeers / ctrlPeers are not provided, defaults are used.
+//   Raft is immediately activated before returning.
+//
+// Limitations / potential failure scenarios:
+//   1. Assumes peer lists are correctly aligned (same length); panics otherwise.
+//   2. Does not validate network reachability of peers at initialization.
+//   3. Coordinator state is in-memory; durability depends entirely on Raft.
 func NewCoordinator(addr string, workers []string, id int, raftPeers []string, ctrlPeers []string) *Coordinator {
 	if len(raftPeers) == 0 {
 		raftPeers = []string{
@@ -52,7 +67,7 @@ func NewCoordinator(addr string, workers []string, id int, raftPeers []string, c
 	}
 
 	if len(raftPeers) != len(ctrlPeers) {
-		panic("raftPeers and ctrlPeers must have same length")
+		panic("raftPeers and ctrlPeers must have same len")
 	}
 
 	peerInfo := make([]raft.RaftSetupInfo, 0, len(raftPeers))
@@ -86,6 +101,16 @@ func NewCoordinator(addr string, workers []string, id int, raftPeers []string, c
 	}
 }
 
+// * Start -- starts background loops and exposes HTTP endpoints for the coordinator.
+//
+// Behaviors:
+// Launches the Raft apply loop and scheduler loop, then starts an HTTP server
+// providing endpoints for chunk registration, job submission, and result queries.
+//
+// Limitations / potential failure scenarios:
+// 1. Blocking call; does not support graceful shutdown.
+// 2. Background goroutines are not terminated if server fails.
+// 3. There are no health checks or restart mechanisms.
 func (c *Coordinator) Start() error {
 	go c.raftApplyLoop()
 	go c.schedulerLoop()
@@ -98,6 +123,16 @@ func (c *Coordinator) Start() error {
 	return http.ListenAndServe(c.Addr, mux)
 }
 
+// * handleRegisterChunk - registers chunk metadata via a replicated command.
+//
+// Behaviors:
+// Validates incoming chunk metadata and submits a Raft command to ensure
+// consistent replication of chunk state across coordinators.
+//
+// Limitations / potential failure scenarios:
+// 1. Rejects invalid chunk definitions (missing ID or replicas).
+// 2. Fails if current node is not Raft leader.
+// 3. No deduplication or version control for repeated registrations.
 func (c *Coordinator) handleRegisterChunk(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -147,9 +182,19 @@ func (c *Coordinator) handleRegisterChunk(w http.ResponseWriter, r *http.Request
 	})
 }
 
+// * handleSubmitJob - submits a new backtesting job into the system.
+//
+// Behaviors:
+// Validates request parameters, constructs a JobSpec, and submits it
+// through Raft so that job creation is replicated and consistent.
+//
+// Limitations / potential failure scenarios:
+// 1. Rejects invalid time ranges or missing fields.
+// 2. Fails if current node is not Raft leader.
+// 3. Does not validate correctness of strategy logic.
 func (c *Coordinator) handleSubmitJob(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
+		WriteError(w, http.StatusMethodNotAllowed, "method is not allowed")
 		return
 	}
 
@@ -204,6 +249,15 @@ func (c *Coordinator) handleSubmitJob(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// * handleJobStatus - returns the current status of a job.
+//
+// Behaviors:
+// Reads replicated state to return the latest job status,
+// including queued, running, completed, or failed states.
+//
+// Limitations / potential failure scenarios:
+// 1. Returns 404 if job does not exist.
+// 2. No progress granularity beyond coarse status.
 func (c *Coordinator) handleJobStatus(w http.ResponseWriter, r *http.Request) {
 	jobID := JobID(r.URL.Query().Get("id"))
 	if jobID == "" {
@@ -225,7 +279,16 @@ func (c *Coordinator) handleJobStatus(w http.ResponseWriter, r *http.Request) {
 		Status: status,
 	})
 }
-
+// * handleJobResult - retrieves the final result of a completed job.
+//
+// Behaviors:
+// Returns stored job results if available, or indicates if the job
+// is still running or has not produced output.
+//
+// Limitations / potential failure scenarios:
+// 1. Returns 202 if job is not finished.
+// 2. Returns 404 if result is missing after completion.
+// 3. Cannot stream partial or intermediate results.
 func (c *Coordinator) handleJobResult(w http.ResponseWriter, r *http.Request) {
 	jobID := JobID(r.URL.Query().Get("id"))
 	if jobID == "" {
@@ -249,7 +312,16 @@ func (c *Coordinator) handleJobResult(w http.ResponseWriter, r *http.Request) {
 
 	WriteJSON(w, http.StatusOK, result)
 }
-
+// * schedulerLoop - continuously schedules and dispatches jobs to workers.
+//
+// Behaviors:
+// Consumes queued jobs, ensures leader only execution, updates job status,
+// assigns chunks, and executes jobs in parallel across workers.
+//
+// Limitations / potential failure scenarios:
+// 1. Only leader schedules jobs; followers remain idle.
+// 2. No load balancing or prioritization strategy.
+// 3. Jobs fail entirely if worker execution fails.
 func (c *Coordinator) schedulerLoop() {
 	// workerIndex := 0
 
@@ -342,6 +414,16 @@ func (c *Coordinator) schedulerLoop() {
 	}
 }
 
+// * findChunksLocked - finds all chunks overlapping a job query.
+//
+// Behaviors:
+// Iterates over chunk metadata and returns all chunks matching
+// the instrument and time range of the job.
+//
+// Limitations / potential failure scenarios:
+// 1. Must be called with mutex held (not thread-safe).
+// 2. Linear scan; inefficient for large metadata sets.
+// 3. No indexing or caching optimization.
 func (c *Coordinator) findChunksLocked(job JobSpec) []ChunkMeta {
 	out := []ChunkMeta{}
 
@@ -370,6 +452,16 @@ func (c *Coordinator) findChunksLocked(job JobSpec) []ChunkMeta {
 // }
 
 // Raft specialized 
+
+// * markJobFailed -- marks a job as failed via Raft replication.
+//
+// Behaviors:
+// Submits a job status update command to ensure failure state
+// is consistently replicated across all coordinators.
+//
+// Limitations / potential failure scenarios:
+// 1. Assumes job exists in metadata.
+// 2. Relies on Raft commit success.
 func (c *Coordinator) markJobFailed(jobID JobID) {
 	_ = c.submitMetadataCommand(DAMBTCommand{
 		Op:     CmdJobStatus,
@@ -379,6 +471,15 @@ func (c *Coordinator) markJobFailed(jobID JobID) {
 	log.Printf("[coordinator] job=%s FAILED", jobID)
 }
 
+// * runJobOnWorker - executes a job on a worker via HTTP.
+//
+// Behaviors:
+// Sends job and chunk data to a worker endpoint and waits
+// for a synchronous result response.
+//
+// Limitations / potential failure scenarios:
+// 1. No retry logic on failure.
+// 2. Network errors directly propagate.
 func runJobOnWorker(workerAddr string, job JobSpec, chunks []ChunkMeta) (JobResult, error) {
 	req := RunJobRequest{
 		Job:    job,
@@ -491,6 +592,15 @@ func runJobOnWorker(workerAddr string, job JobSpec, chunks []ChunkMeta) (JobResu
 
 // workfailure failure n retry helpers
 
+// * runJobWithRetry - retries job execution across workers.
+//
+// Behaviors:
+// Attempts execution on multiple workers in sequence until
+// one succeeds or all fail.
+//
+// Limitations / potential failure scenarios:
+// 1. Sequential retries increase latency.
+// 2. Returns only last encountered error.
 func (c *Coordinator) runJobWithRetry(startIndex int, job JobSpec, chunks []ChunkMeta) (JobResult, int, error) {
 	var lastErr error
 	for attempt := 0; attempt < len(c.workers); attempt++ {
@@ -513,6 +623,14 @@ func (c *Coordinator) runJobWithRetry(startIndex int, job JobSpec, chunks []Chun
 Parallel execution helpers
 */
 
+// * splitChunks - partitions chunks into groups for parallel execution.
+//
+// Behaviors:
+// Distributes chunks evenly across N groups and removes empty groups.
+//
+// Limitations / potential failure scenarios:
+// 1. Does not consider chunk size imbalance.
+// 2. Ignores data locality.
 func splitChunks(chunks []ChunkMeta, n int) [][]ChunkMeta {
 	if n <= 0 {
 		return nil
@@ -535,6 +653,16 @@ func splitChunks(chunks []ChunkMeta, n int) [][]ChunkMeta {
 	return nonEmpty
 }
 
+// * runJobParallel - executes a job across multiple workers concurrently.
+//
+// Behaviors:
+// Splits chunks into groups, runs them in parallel using goroutines,
+// and merges partial results into a final output.
+//
+// Limitations / potential failure scenarios:
+// 1. Fails if any sub-task fails.
+// 2. No partial recovery or retry at group level.
+// 3. Numerical faults do carry on.
 func (c *Coordinator) runJobParallel(job JobSpec, chunks []ChunkMeta) (JobResult, error) {
 	if len(c.workers) == 0 {
 		return JobResult{}, fmt.Errorf("no workers available")
@@ -586,6 +714,15 @@ func (c *Coordinator) runJobParallel(job JobSpec, chunks []ChunkMeta) (JobResult
 
 // RPC upgrade
 
+// * runJobOnWorkerRPC - executes a job using RPC abstraction.
+//
+// Behaviors:
+// Dynamically binds RPC client interface and invokes the
+// RunBacktest method on the worker.
+//
+// Limitations / potential failure scenarios:
+// 1. RPC binding may fail due to interface mismatch.
+// 2. Errors are string-based and not strongly typed.
 func runJobOnWorkerRPC(workerAddr string, job JobSpec, chunks []ChunkMeta) (JobResult, error) {
 	client := &WorkerRPCInterface{}
 
@@ -606,9 +743,19 @@ func runJobOnWorkerRPC(workerAddr string, job JobSpec, chunks []ChunkMeta) (JobR
 }
 
 // raft coordinator
-//This mirrors HKVC pattern: external request becomes a command, 
+// This mirrors HKVC pattern: external request becomes a command, 
 // Raft commits it, then applyCommand mutates local service state. 
 // HKVC already used that model with submitAndWait and consumeApplies. refer to my lab3 HKVC implementation
+
+// * applyDAMBTCommand - applies a committed Raft command to local state.
+//
+// Behaviors:
+// Updates metadata state (chunks, jobs, status, results) according
+// to the operation encoded in the command.
+//
+// Limitations / potential failure scenarios:
+// 1. Assumes commands are valid and well-formed.
+// 2. No schema/version control for command evolution.
 func (c *Coordinator) applyDAMBTCommand(cmd DAMBTCommand) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -645,7 +792,15 @@ func (c *Coordinator) applyDAMBTCommand(cmd DAMBTCommand) {
 	// _ = c.checkpointLocked()
 }
 
-
+// * submitMetadataCommand - submits a command through Raft and waits for commit.
+//
+// Behaviors:
+// Encodes and submits a command to Raft, blocks until the command is
+// applied, and synchronizes using per-index channels.
+//
+// Limitations / potential failure scenarios:
+// 1. Returns error if node is not leader.
+// 2. Fixed timeout may fail under slow consensus.
 func (c *Coordinator) submitMetadataCommand(cmd DAMBTCommand) error {
 	data := EncodeCommand(cmd)
 
@@ -676,6 +831,15 @@ func (c *Coordinator) submitMetadataCommand(cmd DAMBTCommand) error {
 	}
 }
 
+// * raftApplyLoop - processes committed Raft log entries continuously.
+//
+// Behaviors:
+// Reads from apply channel, decodes commands, applies them to local state,
+// and signals waiting goroutines for completion.
+//
+// Limitations / potential failure scenarios:
+// 1. Decode errors are logged but not retried.
+// 2. Silent skip of empty commands, which could be an UB.
 func (c *Coordinator) raftApplyLoop() {
 	for msg := range c.applyCh {
 		if len(msg.Command) == 0 {

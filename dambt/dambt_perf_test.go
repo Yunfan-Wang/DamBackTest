@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestPerfDAMBT_ThroughputAndLatency_75pts(t *testing.T) {
+func TestPerfDAMBT_ThroughputAndLatency_50pts(t *testing.T) {
 	// c := startDAMBTCluster(t, "127.0.0.1:9301,127.0.0.1:9302")
 	c := startDAMBTCluster(t, "")
 	score("performance setup: register chunks", 0)
@@ -103,5 +103,7 @@ func TestPerfDAMBT_ThroughputAndLatency_75pts(t *testing.T) {
 	if avgMeta > 500*time.Millisecond {
 		t.Fatalf("metadata query overhead too high: avg=%v", avgMeta)
 	}
+	fmt.Println("[TEST SUMMARY] Performance DAMBT tests: 50 pts max")
+	fmt.Println("[TEST SUMMARY] Total DAMBT autograded tests: 200 pts max")
 	ok()
 }

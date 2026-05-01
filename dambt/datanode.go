@@ -16,6 +16,11 @@ type DataNode struct {
 	DataDir string
 }
 
+// * NewDataNode - initializes a data node instance.
+//
+// Behaviors:
+// Stores the node address and data directory configuration used by
+// HTTP handlers for chunk storage and retrieval.
 func NewDataNode(addr string, dataDir string) *DataNode {
 	return &DataNode{
 		Addr:    addr,
@@ -23,6 +28,14 @@ func NewDataNode(addr string, dataDir string) *DataNode {
 	}
 }
 
+// * Start - starts the data node HTTP server.
+//
+// Behaviors:
+// Creates the local data directory and exposes HTTP endpoints for
+// storing and fetching market data chunks.
+//
+// Limitations / potential failure scenarios:
+// 1. Fails if the data directory cannot be created. Need os permission.
 func (d *DataNode) Start() error {
 	if err := os.MkdirAll(d.DataDir, 0755); err != nil {
 		return err
@@ -45,6 +58,16 @@ type GetChunkResponse struct {
 	Events  []MarketEvent `json:"events"`
 }
 
+// * handlePutChunk - stores a chunk through the HTTP API.
+//
+// Behaviors:
+// Validates the request, decodes market events, writes them to a CSV chunk file,
+// and returns a success response with the stored chunk ID.
+//
+// Limitations / potential failure scenarios:
+// 1. Rejects non-POST requests or invalid JSON bodies.
+// 2. Fails if chunk ID is missing or file writing fails.
+// 3. Does not compute checksum or update persistent manifest, completed by datanode_manifest.
 func (d *DataNode) handlePutChunk(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		WriteError(w, http.StatusMethodNotAllowed, "method not allowed")
@@ -74,6 +97,15 @@ func (d *DataNode) handlePutChunk(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// * handleGetChunk - retrieves a chunk through the HTTP API.
+//
+// Behaviors:
+// Validates the query parameter, reads the corresponding CSV chunk file,
+// and returns the market events as JSON.
+//
+// Limitations / potential failure scenarios:
+// 1. Rejects non-GET requests or missing chunk IDs.
+// 2. Returns not found if the chunk file cannot be opened or parsed.
 func (d *DataNode) handleGetChunk(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		WriteError(w, http.StatusMethodNotAllowed, "method not allowed")

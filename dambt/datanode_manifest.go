@@ -24,6 +24,16 @@ type DataNodeManifest struct {
 	Chunks  map[ChunkID]ChunkManifestEntry `json:"chunks"`
 }
 
+
+// * LoadDataNodeManifest -- loads a data node manifest from disk.
+//
+// Behaviors:
+// Reads the manifest JSON file, initializes an empty manifest if the file
+// does not exist, and restores the chunk metadata map for future storage lookup.
+//
+// Limitations / potential failure scenarios:
+// 1. Returns an error if the manifest file exists but cannot be read.
+// 2. Returns an error if JSON decoding fails.
 func LoadDataNodeManifest(path string) (*DataNodeManifest, error) {
 	m := &DataNodeManifest{
 		Path:   path,
@@ -54,6 +64,17 @@ func LoadDataNodeManifest(path string) (*DataNodeManifest, error) {
 	return m, nil
 }
 
+
+// * Save -- persists the data node manifest atomically.
+//
+// Behaviors:
+// Serializes the manifest as indented JSON, writes it to a temporary file,
+// and renames the temporary file into the final manifest path.
+//
+// Limitations / potential failure scenarios:
+// 1. Fails if the manifest directory cannot be created.
+// 2. Fails if JSON serialization or file writing fails.
+// 3. Atomicity depends on os.Rename behavior of the underlying filesystem.
 func (m *DataNodeManifest) Save() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

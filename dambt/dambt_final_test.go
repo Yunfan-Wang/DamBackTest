@@ -465,13 +465,12 @@ func waitDone(t *testing.T, c *testCluster, jobID string) JobResult {
 }
 
 // Total: 150 points.
-// This maps to the proposal categories:
 // Functional correctness: 70
 // Fault tolerance: 30
 // Raft/metadata consistency: 30
 // Basic throughput smoke: 20
 //
-// The proposal calls for functional tests, worker/storage fault tolerance tests,
+// You can find in the proposal calls for functional tests, worker/storage fault tolerance tests,
 // consistency tests, and performance evaluation. This suite implements the
 // CI-safe subset of those requirements. The larger optional performance/cache/
 // prefetch tests can be added after the core system stabilizes.
@@ -644,6 +643,7 @@ func TestFinalDAMBT_PerformanceSmoke_20pts(t *testing.T) {
 	}
 
 	fmt.Printf("completed %d jobs in %v\n", jobs, elapsed)
+	fmt.Println("[TEST SUMMARY] Final DAMBT tests: 150 pts max")
 	ok()
 }
 
@@ -756,4 +756,8 @@ func checkCoordinatorHealth(coords []string) {
 		code, body, err := doGet(base + "/job_status?id=__healthcheck__")
 		hprintf("[TEST-HARNESS] %s health err=%v code=%d body=%s\n", base, err, code, string(body))
 	}
+}
+
+func printSuiteSummary(name string, earned, max int) {
+	fmt.Printf("[TEST SUMMARY] %s: %d/%d pts earned\n", name, earned, max)
 }

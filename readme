@@ -1,1 +1,126 @@
-Dam BT repo
+# DAM Backtest Architecture
+
+## 1. Project Overview
+# DAMBT: Distributed Algorithmic Market BackTesting System
+
+DAMBT is a distributed backtesting engine that separates:
+1. metadata coordination (Coordinator)
+2. distributed execution (Worker)
+3. data storage (DataNode)
+
+The system uses Raft to replicate metadata across coordinators.
+
+## 2. System Architecture - Design Overview
+## Architecture
+
+DAMBT consists of three core components:
+
+### Coordinator
+- Manages metadata (chunks, jobs, results)
+- Dispatches jobs to workers
+- Uses Raft for fault-tolerant replication
+
+### Worker
+- Fetches chunk data from DataNodes
+- Executes backtesting strategy
+- Returns results to Coordinator
+
+### DataNode
+- Stores chunked market data
+- Serves data via RPC
+
+### Data Flow
+
+Client → Coordinator → Workers → DataNodes
+               ↑
+              Raft
+              (DG)
+
+## 3. Failure Model
+## Failure Handling
+
+- Coordinator:
+    Non-leader rejects writes
+    Leader failure handled by Raft election
+
+- Worker:
+    Job fails if all replicas unreachable
+    Partial retries handled by Coordinator
+
+- DataNode:
+    No replication yet (single-node storage)
+    Data corruption not handled (future work)
+
+## 4. Environment Setup
+
+Requirements:
+- Go 1.22+
+- Linux / macOS / Windows
+
+Verify:
+- go version
+
+## 5. Build Instructions
+
+Build all packages:
+
+make build
+
+## 6. Test Instructions
+
+# Run all tests:
+
+make all
+
+# Run final correctness tests:
+
+make final
+
+# Run performance tests:
+
+make perf
+
+# Run with debug logs:
+
+make all-debug
+
+## 7. Running the System
+## Running DAMBT (Local Demo)
+
+# Open multiple terminals:
+
+# Terminal 1:
+make run-datanode1
+
+# Terminal 2:
+make run-worker1
+
+# Terminal 3:
+make run-worker2
+
+# Terminal 4+:
+make run-coord0
+make run-coord1
+make run-coord2
+
+## 8. Example Usage
+
+# Example Workflow
+1. Upload chunks
+2. Register chunks
+3. Submit job
+4. Query result
+
+## 9. Limitations
+
+No persistent storage for Raft yet
+No real market replay engine
+No strategy plugin system
+DataNode is single-replica
+
+## 10. Future Work
+
+Strategy plugin system (Python/C++)
+Market replay engine
+Data replication across DataNodes 
+Persistent Raft state

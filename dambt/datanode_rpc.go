@@ -28,6 +28,15 @@ func init() {
 	gob.Register([]MarketEvent{})
 }
 
+// * NewDataNodeRPCServer - initializes a data node RPC server.
+//
+// Behaviors:
+// Creates the data directory if needed, loads the persistent chunk manifest,
+// and prepares the server for PutChunk and GetChunk RPC operations.
+//
+// Limitations / potential failure scenarios:
+// 1. Panics if the manifest cannot be loaded.
+// 2. Does not validate whether existing manifest entries point to valid files.
 func NewDataNodeRPCServer(addr string, dataDir string) *DataNodeRPCServer {
 	_ = os.MkdirAll(dataDir, 0755)
 
@@ -44,6 +53,15 @@ func NewDataNodeRPCServer(addr string, dataDir string) *DataNodeRPCServer {
 	}
 }
 
+// * PutChunk - stores a chunk and records it in the data node manifest.
+//
+// Behaviors:
+// Validates the chunk ID, writes market events to disk, computes a checksum,
+// marks the chunk as sealed, and persists its metadata in the manifest.
+//
+// Limitations / potential failure scenarios:
+// 1. Fails if chunk ID is missing or storage directory cannot be created.
+// 2. Fails if writing events, computing checksum, or saving manifest fails.
 func (d *DataNodeRPCServer) PutChunk(req PutChunkRequest) (bool, remote.RemoteError) {
 	if req.ChunkID == "" {
 		return false, remote.RemoteError{Err: "missing chunk_id"}
@@ -83,6 +101,14 @@ func (d *DataNodeRPCServer) PutChunk(req PutChunkRequest) (bool, remote.RemoteEr
 	return true, remote.RemoteError{}
 }
 
+// * GetChunk - retrieves a stored chunk after checksum verification.
+//
+// Behaviors:
+// Looks up chunk metadata in the manifest, verifies the file checksum,
+// reads events from disk, and returns them to the caller.
+//
+// Limitations / potential failure scenarios:
+// 1. Fails if the chunk ID is missing or not registered.
 func (d *DataNodeRPCServer) GetChunk(id ChunkID) (GetChunkResponse, remote.RemoteError) {
 	if id == "" {
 		return GetChunkResponse{}, remote.RemoteError{Err: "missing chunk_id"}
