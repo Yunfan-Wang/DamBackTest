@@ -21,9 +21,7 @@ jobs:
         run: go build ./...
 
       - name: Run final tests
-        working-directory: ../../
         run: make final
 
       - name: Run performance tests
-        working-directory: ../../
         run: make perf
