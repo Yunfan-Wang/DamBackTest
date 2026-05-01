@@ -67,6 +67,15 @@ type testCluster struct {
 	dataNode   string
 }
 
+// global helper
+var debugHarness = os.Getenv("DAMBT_TEST_DEBUG") == "1"
+
+func hprintf(format string, args ...any) {
+	if debugHarness {
+		fmt.Printf(format, args...)
+	}
+}
+
 func repoRoot(t *testing.T) string {
 	t.Helper()
 
@@ -93,8 +102,10 @@ func startBinary(t *testing.T, ctx context.Context, dir string, bin string, args
 
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Dir = dir
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	if debugHarness {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	}
 
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP,
@@ -117,16 +128,16 @@ func killProcessTree(cmd *exec.Cmd) {
 }
 
 func cleanupProcesses(cmds []*exec.Cmd) {
-	fmt.Printf("\n[TEST-HARNESS] cleanupProcesses: count=%d\n", len(cmds))
+	hprintf("\n[TEST-HARNESS] cleanupProcesses: count=%d\n", len(cmds))
 
 	for i, cmd := range cmds {
 		if cmd == nil || cmd.Process == nil {
-			fmt.Printf("[TEST-HARNESS] cleanupProcesses[%d]: nil process\n", i)
+			hprintf("[TEST-HARNESS] cleanupProcesses[%d]: nil process\n", i)
 			continue
 		}
 
 		pid := cmd.Process.Pid
-		fmt.Printf("[TEST-HARNESS] cleanupProcesses[%d]: kill pid=%d\n", i, pid)
+		hprintf("[TEST-HARNESS] cleanupProcesses[%d]: kill pid=%d\n", i, pid)
 
 		_ = cmd.Process.Kill()
 
@@ -138,9 +149,9 @@ func cleanupProcesses(cmds []*exec.Cmd) {
 
 		select {
 		case <-done:
-			fmt.Printf("[TEST-HARNESS] cleanupProcesses[%d]: wait done pid=%d\n", i, pid)
+			hprintf("[TEST-HARNESS] cleanupProcesses[%d]: wait done pid=%d\n", i, pid)
 		case <-time.After(500 * time.Millisecond):
-			fmt.Printf("[TEST-HARNESS] cleanupProcesses[%d]: wait timeout pid=%d\n", i, pid)
+			hprintf("[TEST-HARNESS] cleanupProcesses[%d]: wait timeout pid=%d\n", i, pid)
 		}
 	}
 }
@@ -711,7 +722,7 @@ func killPorts() {
 }
 // debug printings
 func logStep(msg string) {
-	fmt.Printf("\n[TEST-HARNESS] %s\n", msg)
+	hprintf("\n[TEST-HARNESS] %s\n", msg)
 }
 
 func debugPortOwner(port string) {
@@ -739,11 +750,10 @@ func debugPortOwner(port string) {
 
 
 func checkCoordinatorHealth(coords []string) {
-	fmt.Println("\n[TEST-HARNESS] coordinator health check")
+	hprintf("\n[TEST-HARNESS] coordinator health check\n")
 
 	for _, base := range coords {
 		code, body, err := doGet(base + "/job_status?id=__healthcheck__")
-		fmt.Printf("[TEST-HARNESS] %s health err=%v code=%d body=%s\n",
-			base, err, code, string(body))
+		hprintf("[TEST-HARNESS] %s health err=%v code=%d body=%s\n", base, err, code, string(body))
 	}
 }

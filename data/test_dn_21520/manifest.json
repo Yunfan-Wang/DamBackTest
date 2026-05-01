@@ -1,0 +1,20 @@
+{
+  "chunks": {
+    "chunk1": {
+      "chunk_id": "chunk1",
+      "path": "data\\test_dn_21520\\chunk1.csv",
+      "events": 2,
+      "checksum": "2c7b910864aaa6e7dd3603a2c1222f0ebe4c7834b7141f48404d839306c12537",
+      "version": 1,
+      "sealed": true
+    },
+    "chunk2": {
+      "chunk_id": "chunk2",
+      "path": "data\\test_dn_21520\\chunk2.csv",
+      "events": 2,
+      "checksum": "23fe9cbc8802f41e41fc2c9e846e4f4189352f127ada8e03df68a2f73c805853",
+      "version": 1,
+      "sealed": true
+    }
+  }
+}
